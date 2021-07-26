@@ -6,8 +6,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.AssetManager;
 import android.graphics.BitmapFactory;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorManager;
+import android.hardware.camera2.CameraCharacteristics;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Surface;
 import android.view.View;
 
 import com.dynamsoft.dce.CameraDLSLicenseVerificationListener;
@@ -15,6 +20,7 @@ import com.dynamsoft.dce.CameraEnhancer;
 import com.dynamsoft.dce.CameraState;
 import com.dynamsoft.dce.CameraView;
 import com.dynamsoft.dce.Frame;
+import com.dynamsoft.dce.Resolution;
 import com.dynamsoft.dlr.DLRImageData;
 import com.dynamsoft.dlr.DLRLTSLicenseVerificationListener;
 import com.dynamsoft.dlr.DLRLineResult;
@@ -35,6 +41,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.*;
 import android.graphics.*;
+import android.view.WindowManager;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
@@ -43,9 +50,12 @@ import java.util.concurrent.Executors;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.widget.Toast;
+import android.util.Size;
+
+import android.content.res.Configuration;
 
 public class MainActivity extends AppCompatActivity {
-    public static final String EXTRA_MESSAGE = "image";
     private CameraEnhancer mCameraEnhancer;
     private CameraView cameraView;
     private FloatingActionButton mButton;
@@ -54,7 +64,7 @@ public class MainActivity extends AppCompatActivity {
 
     private HandlerThread mHandlerThread;
     private Handler mHandler;
-    private  ,mExecutor mExecutor;
+    private Executor mExecutor;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,6 +83,26 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 mProgressBar.setVisibility(View.VISIBLE);
                 final Frame frame = mCameraEnhancer.AcquireListFrame(true);
+                int orientation = getResources().getConfiguration().orientation;
+
+                byte[] data = frame.data;
+                int width = frame.width;
+                int height = frame.height;
+                int stride = frame.strides[0];
+                if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                    // Rotate image
+                    data = Utils.rotateGrayscale90(data, width, height);
+                    width = frame.height;
+                    height = frame.width;
+                    stride = frame.height;
+                }
+
+                final DLRImageData dlrData = new DLRImageData();
+                dlrData.bytes = data;
+                dlrData.format = EnumDLRImagePixelFormat.DLR_IPF_GRAYSCALED;
+                dlrData.stride = stride;
+                dlrData.width = width;
+                dlrData.height = height;
 
                 mExecutor.execute(new Runnable() {
                     @Override
@@ -81,18 +111,12 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             File outputDir = MainActivity.this.getCacheDir();
                             File outputFile = File.createTempFile("tmp", ".png", outputDir);
+                            Utils.saveFrame(dlrData.bytes, dlrData.width, dlrData.height, outputFile.toString());
 
-                            Utils.saveFrame(frame, outputFile.toString());
-
-                            DLRImageData data = new DLRImageData();
-                            data.bytes = frame.data;
-                            data.format = EnumDLRImagePixelFormat.DLR_IPF_GRAYSCALED;
-                            data.stride = frame.strides[0];
-                            data.width = frame.width;
-                            data.height = frame.height;
                             DLRResult[] results = null;
                             try {
-                                results = mRecognition.recognizeByBuffer(data, "locr");
+                                results = mRecognition.recognizeByBuffer(dlrData, "locr");
+//                                results = mRecognition.recognizeByFile(outputFile.toString(), "locr");
                             }
                             catch (Exception e) {
                                 e.printStackTrace();
@@ -101,8 +125,23 @@ public class MainActivity extends AppCompatActivity {
                             if (results != null) {
                                 for (DLRResult result : results) {
                                     DLRLineResult[] lines = result.lineResults;
-                                    for (DLRLineResult line : lines) {
-                                        Log.i("DLR", line.text);
+                                    if (lines.length == 2) {
+                                        String line1 = lines[0].text;
+                                        String line2 = lines[1].text;
+
+                                        String mrzResult = Utils.parse(line1, line2);
+
+                                        runOnUiThread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                mProgressBar.setVisibility(View.GONE);
+                                                Intent intent = new Intent(MainActivity.this, ResultActivity.class);
+                                                intent.putExtra("path", outputFile.toString());
+                                                intent.putExtra("result", mrzResult);
+                                                startActivity(intent);
+                                            }
+                                        });
+                                        return;
                                     }
                                 }
                             }
@@ -112,8 +151,10 @@ public class MainActivity extends AppCompatActivity {
                                 public void run() {
                                     mProgressBar.setVisibility(View.GONE);
                                     Intent intent = new Intent(MainActivity.this, ResultActivity.class);
-                                    intent.putExtra(EXTRA_MESSAGE, outputFile.toString());
+                                    intent.putExtra("path", outputFile.toString());
                                     startActivity(intent);
+//                                    Toast.makeText(MainActivity.this, "No recognition result.", Toast.LENGTH_SHORT)
+//                                            .show();
                                 }
                             });
 
