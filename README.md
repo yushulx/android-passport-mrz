@@ -17,3 +17,6 @@ An Android project for recognizing passport MRZ.
 3. Build and run the project.
 
     ![Android passport MRZ recognition](https://www.dynamsoft.com/blog/wp-content/uploads/2021/07/android-passport-mrz-ocr.jpg)
+
+## Blog
+[Android OCR Recognition for Passport MRZ](https://www.dynamsoft.com/codepool/android-ocr-recognition-passport-mrz.html)
